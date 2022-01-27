@@ -1,0 +1,158 @@
+/*
+============================================================================
+Name : Histogram_Privatized.cu
+Author : Errikos_Kostopoulos
+Description : CUDA compute histogram using privatization
+============================================================================
+*/
+#include <stdio.h>
+#include <numeric>
+#include <stdlib.h>
+#include <time.h>
+#include <cuda.h>
+#define BLOCK_SIZE 64
+__global__ void histo_privatized_kernel(unsigned char *buffer, long size, unsigned int *histo);
+
+int main(void) {
+    unsigned char *buffer;
+    unsigned int *histo;
+
+// This solution assumes the input buffer size is an exact multiple of BLOCK_SIZE
+    long size = 1024 * 64;
+
+// I use this for the generation of values in the example input array.
+    srand(time(NULL));
+    cudaMallocManaged(&buffer, size * sizeof(unsigned char));
+    cudaMallocManaged(&histo, 7 * sizeof(unsigned int));
+    cudaError_t err;
+
+
+    for (int i=0; i < size; i++) {
+    switch(int index = rand() % 26) {
+        case 0:
+            buffer[i] = 'a';
+            break;
+        case 1:
+            buffer[i] = 'b';
+            break;
+        case 2:
+            buffer[i] = 'c';
+            break;
+        case 3:
+            buffer[i] = 'd';
+            break;
+        case 4:
+            buffer[i] = 'e';
+            break;
+        case 5:
+            buffer[i] = 'f';
+            break;
+        case 6:
+            buffer[i] = 'g';
+            break;
+        case 7:
+            buffer[i] = 'h';
+            break;
+        case 8:
+            buffer[i] = 'i';
+            break;
+        case 9:
+            buffer[i] = 'j';
+            break;
+        case 10:
+            buffer[i] = 'k';
+            break;
+        case 11:
+            buffer[i] = 'l';
+            break;
+        case 12:
+            buffer[i] = 'm';
+            break;
+        case 13:
+            buffer[i] = 'n';
+            break;
+        case 14:
+            buffer[i] = 'o';
+            break;
+        case 15:
+            buffer[i] = 'p';
+            break;
+        case 16:
+            buffer[i] = 'q';
+            break;
+        case 17:
+            buffer[i] = 'r';
+            break;
+        case 18:
+            buffer[i] = 's';
+            break;
+        case 19:
+            buffer[i] = 't';
+            break;
+        case 20:
+            buffer[i] = 'u';
+            break;
+        case 21:
+            buffer[i] = 'v';
+            break;
+        case 22:
+            buffer[i] = 'w';
+            break;
+        case 23:
+            buffer[i] = 'x';
+            break;
+        case 24:
+            buffer[i] = 'y';
+            break;
+        case 25:
+            buffer[i] = 'z';
+            break;
+        default: // just in case my logic is a bit messed up
+            buffer[i] = 'p';
+    }
+}
+
+// initialise the histogram
+for (int i=0; i < 7; i++) {
+    histo[i] = 0;
+}
+
+
+int grid_size = size/BLOCK_SIZE;
+histo_privatized_kernel<<<grid_size, BLOCK_SIZE>>>(buffer, size, histo);
+
+
+// wait for Device to finish before accessing data on the host
+err = cudaDeviceSynchronize();
+printf("Run kernel: %s\n", cudaGetErrorString(err));
+
+// print out the resulting histogram
+for (int i = 0; i < 7; i++)
+{
+    printf("Bin no. %d: Count = %d\n", i, histo[i]);
+}
+return 0;
+}
+
+__global__ void histo_privatized_kernel(unsigned char *buffer, long size, unsigned int *histo) {
+    unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    // Privatized bins
+    __shared__ unsigned int histo_s[7];
+    // threads cooperate to initialise the local histo.
+    if (threadIdx.x < 7) histo_s[threadIdx.x] = 0;
+    __syncthreads();
+    // Now cooperate to generate the local copy of the histogram
+    // This version can handle cases where the size of the input buffer is greater than the number of threads in the grid
+    for (unsigned int i = tid; i < size; i += blockDim.x * gridDim.x) {
+        int alphabet_position = buffer[i] - 'a';
+        if (alphabet_position >= 0 && alphabet_position < 26) {
+            atomicAdd(&(histo_s[alphabet_position/4]), 1);
+    }
+}
+__syncthreads();
+
+    // Commit to global memory
+    for (unsigned int binIdx = threadIdx.x; binIdx < 7; binIdx += blockDim.x) {
+        atomicAdd(&(histo[binIdx]), histo_s[binIdx]);
+    }
+}
